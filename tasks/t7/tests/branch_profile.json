@@ -1,0 +1,5 @@
+{ "profile" :  [
+{"args":["v2"],"labels":["if.1","else.1"],"op":"br"},
+{"args":["v0","vc0"],"dest":"v3","op":"add","type":"int"},
+{"args":["v0","vc0"],"dest":"v3","op":"sub","type":"int"}
+] }

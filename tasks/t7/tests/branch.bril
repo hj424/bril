@@ -1,0 +1,35 @@
+# Branch example
+# For evaluating a tracing JIT
+
+# pseudo code
+# main(x) {
+#   a = 1;
+#   if (x < 100) {
+#     y = y + 1;
+#     a = 100;
+#   }
+#   else {
+#     y = y - 1;
+#   }
+#   print y;
+# }
+
+@main (x: int) {
+  # const
+  vc0: int = const 1;
+  vc1: int = const 100;
+  # take two input ops, first iteration
+  v0: int = id x;
+  v1: int = id vc0;
+  v2: bool = lt v0 vc1;
+  br v2 .if.1 .else.1;
+.if.1:
+  v3: int = add v0 vc0;
+  v1: int = id vc1;
+  jmp .program.end;
+.else.1:
+  v3: int = sub v0 vc0;
+ # print out the results
+.program.end:
+  print v3;
+}
