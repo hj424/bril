@@ -36,7 +36,8 @@ interface Op {
  */
 export interface EffectOperation extends Op {
   op: "br" | "jmp" | "print" | "ret" | "call" |
-    "store" | "free";
+    "store" | "free" |
+    "speculate" | "guard" | "commit";
 }
 
 /**
@@ -50,7 +51,8 @@ export interface ValueOperation extends Op {
       "call" |
       "load" | "ptradd" | "alloc" |
       "fadd" | "fmul" | "fsub" | "fdiv" |
-      "feq" | "flt" | "fle" | "fgt" | "fge";
+      "feq" | "flt" | "fle" | "fgt" | "fge" |
+      "phi";
   dest: Ident;
   type: Type;
 }
