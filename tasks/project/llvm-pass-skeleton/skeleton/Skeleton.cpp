@@ -34,20 +34,19 @@ namespace {
     }
 
     // Loop analysis
-    static void LoopAnalysis(Loop *L, BinaryOperator *&Increment, Value *&Bound, BranchInst *&BackBranch, PHINode *&InductionPHI, ScalarEvolution *SE) {
+    static void LoopAnalysis(Loop *L, BinaryOperator *&Increment, Value *&Bound, BranchInst *&BackBranch,  ScalarEvolution *SE) {
       // loop should be in simplified form
       if (!L->isLoopSimplifyForm()) {
-        errs() << "Loop is not in normal form\n";
+        errs() << "Loop is not in a simplified form.\n";
       }
       // There must be exactly one exiting block, and it must be the same at the latch.
       BasicBlock *Latch = L->getLoopLatch();
       if (L->getExitingBlock() != Latch) {
-        errs() << "Exiting and latch block are different\n";
+        errs() << "Exiting and latch block are different.\n";
       }
       // Latch block must end in a conditional branch.
       //BackBranch = dyn_cast<BranchInst>(Latch->getTerminator());
       BackBranch = dyn_cast<BranchInst>(L->getExitingBlock()->getTerminator());
-      errs() << "C1...\n";
       //if (!BackBranch || !BackBranch->isConditional()) {
       //  errs() << "Could not find back-branch\n";
       //}
@@ -55,106 +54,105 @@ namespace {
 
       // Find loop increment and bound
       ICmpInst *Compare = dyn_cast<ICmpInst>(BackBranch->getCondition());
-      errs() << "C2...\n";
       Increment = dyn_cast<BinaryOperator>(Compare->getOperand(0));
       Bound = Compare->getOperand(1);
       errs() << "Loop bound: " << *Bound << "\n";
-      errs() << "Loop increment: " << Increment << "\n";
-
-      // find induction PHI nodes
-      //InductionPHI = L->getCanonicalInductionVariable();
-      InductionPHI = L->getInductionVariable(*SE);
-      /*
-      for (PHINode &PHI : L->getHeader()->phis()) {
-        &PHI = L->getCanonicalInductionVariable();
-        InductionDescriptor ID;
-        if (InductionDescriptor::isInductionPHI(&PHI, L, SE, ID)) {
-          InductionPHI = &PHI;
-          errs() << "Found induction PHI: "; InductionPHI->dump();
-          break;
-        }
-      }
-      */
-      if (!InductionPHI) {
-        errs() << "Could not find induction PHI\n";
-      }
-    }
-
-    // PHInodeAnalysis
-    static void PHInodeAnalysis(Loop *L, Loop *InnerLoop,
-                      SmallPtrSetImpl<PHINode *> &InnerPHIsToTransform,
-                      PHINode *InnerInductionPHI, PHINode *OuterInductionPHI) {
-      
+      //errs() << "Loop increment: " << Increment << "\n";
     }
 
     bool runOnLoop(Loop *L, LPPassManager &LPM) override {
       errs() << "Default optimizations... \n";
      
       if  (L->getSubLoops().size() != 1) {
-        errs() << "Unnested loop, stop flattening it!";
+        errs() << "Unnested loop, stop flattening. \n";
       }
       else {
         errs() << "Find nested loop...\n";
         // Loop analysis pass
         ScalarEvolution *SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
-        errs() << "1...\n";
         // Loop basic info
         LoopInfo *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-        errs() << "2...\n";
         // Donimatortree
         auto *DTWP = getAnalysisIfAvailable<DominatorTreeWrapperPass>();
         DominatorTree *DT = DTWP ? &DTWP->getDomTree() : nullptr;
-        errs() << "3...\n";
         
         Loop *InnerLoop = *L->begin();
         errs() << "Loop flattening running on nested loop: " << L->getHeader()->getName() << "\n";
-        //
+       
+        // local variables 
         BranchInst *InnerBranch, *OuterBranch;
-        
-        PHINode *InnerInductionPHI, *OuterInductionPHI;
         Value *InnerBound, *OuterBound;
         BinaryOperator *InnerIncrement, *OuterIncrement;
+
 
         //-----------------------------------------------------------
         // flatten the nested loop
         //-----------------------------------------------------------
         // Loop analysis
-        LoopAnalysis(L, OuterIncrement, OuterBound, OuterBranch, OuterInductionPHI, SE);
-        LoopAnalysis(InnerLoop, InnerIncrement, InnerBound, InnerBranch, InnerInductionPHI, SE);
+        LoopAnalysis(L, OuterIncrement, OuterBound, OuterBranch, SE);
+        LoopAnalysis(InnerLoop, InnerIncrement, InnerBound, InnerBranch, SE);
 
-        SmallPtrSet<PHINode *, 4> InnerPHIsToTransform;
-        // PHI node analysis
-        PHInodeAnalysis(L, InnerLoop, InnerPHIsToTransform, InnerInductionPHI, OuterInductionPHI);
-
-        // remove the PHI nodes related to innerloop backedge
-        //InnerInductionPHI->removeIncomingValue(InnerLoop->getLoopLatch());
-        //for (PHINode *PHI : InnerPHIsToTransform)
-         // PHI->removeIncomingValue(InnerLoop->getLoopLatch());
-
-        // new loop bound
+        // update loop bound
+        /*
         Value *NewBound = BinaryOperator::CreateMul(InnerBound, OuterBound, "NewBound", L->getLoopPreheader()->getTerminator());
-        errs() << *NewBound <<"\n";
+        errs() << "NewBound: " << *NewBound <<"\n";
+        */
         // modify the trip cout of the outer loop
-        cast<User>(OuterBranch->getCondition())->setOperand(1, NewBound);
-        // replace the inner loop backedge with unconditional exit
+        //cast<User>(OuterBranch->getCondition())->setOperand(1, NewBound);
+        //cast<User>(OuterBranch->getCondition())->getOperand(1)->replaceAllUsesWith(NewBound);
+        //cast<User>(InnerBranch->getCondition())->setOperand(1, NewBound);
+       
+        // outer loop bound -> 1 
+        errs() << "=============" << "\n";
+        for (auto &I : *(L->getHeader())) {
+          errs() << "Outer Loop IR: " << I << "\n";
+          // op: icmp == 53
+          if (I.getOpcode() == 53) { // Hard Coded for simplicity.
+            /*
+            errs() << *(cast<User>(I).getOperand(0)) << "\n";
+            errs() << *(cast<User>(I).getOperand(1)) << "\n";
+            errs() << *(cast<User>(I).getOperand(1))->getType()<< "\n";
+            */
+            // replace the old loop bound with new values
+            Value* oldvalue = (I.getOperand(1));
+            Value* newvalue = ConstantInt::get(oldvalue->getType(), 1);
+            //I.setOperand(1, newvalue);
+            I.getOperand(1)->replaceAllUsesWith(newvalue);
+            //I.getOperand(1)->replaceNonMetadataUsesWith(newvalue);
+          }
+        }
+        
+        // inner loop bound -> outer loop bound * inner loop bound  
+        //errs() << OuterBound->getContext() << "\n";
+        errs() << "=============" << "\n";
+        for (auto &I : *(InnerLoop->getHeader())) {
+          errs() << "Inner Loop IR: " << I << "\n";
+          // op: icmp == 53
+          if (I.getOpcode() == 53) { // Hard Coded for simplicity.
+            // replace the old loop bound with new values
+            Value* oldvalue = (I.getOperand(1));
+            Value* newvalue = ConstantInt::get(oldvalue->getType(), 220);
+            I.getOperand(1)->replaceAllUsesWith(newvalue);
+          }
+        }
+        /* 
         BasicBlock *InnerExitBlock = InnerLoop->getExitBlock();
         BasicBlock *InnerExitingBlock = InnerLoop->getExitingBlock();
-        errs() << "==========================\n";
-        errs() << *InnerExitBlock << "\n";
-        errs() << "==========================\n";
-        errs() << *InnerExitingBlock << "\n";
         InnerExitingBlock->getTerminator()->eraseFromParent();
         BranchInst::Create(InnerExitBlock, InnerExitingBlock);
         DT->deleteEdge(InnerExitingBlock, InnerLoop->getHeader());
+        */
+        /*
         errs() << "==========================\n";
         errs() << *InnerExitBlock << "\n";
         errs() << "==========================\n";
         errs() << *InnerExitingBlock << "\n";
+        */
 
         // mark the inner loop as a deleted one
-        LPM.markLoopAsDeleted(*InnerLoop);
-        SE->forgetLoop(L);
-        SE->forgetLoop(InnerLoop);
+        //LPM.markLoopAsDeleted(*InnerLoop);
+        //SE->forgetLoop(L);
+        //SE->forgetLoop(InnerLoop);
         //LI->erase(InnerLoop);
         errs() << *L << "\n";
       }
