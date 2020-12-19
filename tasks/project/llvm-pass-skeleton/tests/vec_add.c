@@ -5,10 +5,9 @@ int main() {
   int n = 10;
   int m = 10;
   int res[m][n];
-  OUTER:
-  for (int i = 0; i < n; i++) {
-  INNER:
-    for (int j = 0; j < m; j++) {
+  LOOP:
+  for (int i = 0; i < 10; i++) {
+    for (int j = 0; j < 10; j++) {
       res[i][j] = m;
     }
   }

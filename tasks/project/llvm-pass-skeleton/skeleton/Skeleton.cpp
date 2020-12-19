@@ -14,18 +14,19 @@
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils.h"
-
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Transforms/Utils/LoopUtils.h"
 
 using namespace llvm;
 
 namespace {
-  struct SkeletonPass : public FunctionPass {
+  struct SkeletonPass : public LoopPass {
     static char ID;
-    SkeletonPass() : FunctionPass(ID) {}
+    SkeletonPass() : LoopPass(ID) {}
 
     // This example modifies the program, but preserves CFG.
-    void getAnalysisUsage(AnalysisUsage &AU) const {
-      AU.setPreservesCFG();
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
+      getLoopAnalysisUsage(AU);
       // Legacy analysis pass to compute loop infomation.  
       AU.addRequired<LoopInfoWrapperPass>();
       // Legacy analysis pass to compute dominator tree.
@@ -33,7 +34,7 @@ namespace {
     }
 
     // Loop analysis
-    void LoopAnalysis(Loop *L, BinaryOperator *&Increment, Value *&Bound, BranchInst *&BackBranch) {
+    static void LoopAnalysis(Loop *L, BinaryOperator *&Increment, Value *&Bound, BranchInst *&BackBranch, PHINode *&InductionPHI, ScalarEvolution *SE) {
       // loop should be in simplified form
       if (!L->isLoopSimplifyForm()) {
         errs() << "Loop is not in normal form\n";
@@ -44,82 +45,118 @@ namespace {
         errs() << "Exiting and latch block are different\n";
       }
       // Latch block must end in a conditional branch.
-      BackBranch = dyn_cast<BranchInst>(Latch->getTerminator());
-      if (!BackBranch || !BackBranch->isConditional()) {
-        errs() << "Could not find back-branch\n";
-      }
+      //BackBranch = dyn_cast<BranchInst>(Latch->getTerminator());
+      BackBranch = dyn_cast<BranchInst>(L->getExitingBlock()->getTerminator());
+      errs() << "C1...\n";
+      //if (!BackBranch || !BackBranch->isConditional()) {
+      //  errs() << "Could not find back-branch\n";
+      //}
       //errs() << "Found back branch: "; BackBranch->dump();
 
       // Find loop increment and bound
       ICmpInst *Compare = dyn_cast<ICmpInst>(BackBranch->getCondition());
+      errs() << "C2...\n";
       Increment = dyn_cast<BinaryOperator>(Compare->getOperand(0));
       Bound = Compare->getOperand(1);
-      errs() << "Loop bound: " << Bound << "\n";
+      errs() << "Loop bound: " << *Bound << "\n";
       errs() << "Loop increment: " << Increment << "\n";
-    }
 
-    virtual bool runOnFunction(Function &F) {
-      errs() << "Default optimizations... \n";
-     
-      // craete llvm function with
-      LLVMContext &Ctx = F.getContext();
-      std::vector<Type*> paramTypes = {Type::getInt32Ty(Ctx)};
-      Type *retType = Type::getVoidTy(Ctx);
-      FunctionType *logFuncType = FunctionType::get(retType, paramTypes, false);
-      Module* module = F.getParent();
-      //Constant *logFunc = module->getOrInsertFunction("logop", logFuncType);
-
-      // apply useful passes
-      legacy::FunctionPassManager FPM(module);
-      FPM.add(createConstantPropagationPass());
-      FPM.add(createIndVarSimplifyPass());
-      FPM.add(createDeadCodeEliminationPass());
-      FPM.add(createLoopSimplifyPass());
-      FPM.doInitialization();
-      bool changed = FPM.run(F);
-      FPM.doFinalization();
-
-      // perform loop analysis
-      LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-
-      // iterate all loops
-      for (auto* L : LI) {
-        if  (L->getSubLoops().size() != 1) {
-          errs() << "Unnested loop, stop flattening it!";
+      // find induction PHI nodes
+      //InductionPHI = L->getCanonicalInductionVariable();
+      InductionPHI = L->getInductionVariable(*SE);
+      /*
+      for (PHINode &PHI : L->getHeader()->phis()) {
+        &PHI = L->getCanonicalInductionVariable();
+        InductionDescriptor ID;
+        if (InductionDescriptor::isInductionPHI(&PHI, L, SE, ID)) {
+          InductionPHI = &PHI;
+          errs() << "Found induction PHI: "; InductionPHI->dump();
           break;
         }
-        else {
-          errs() << "Find nested loop...\n";
-          /*
-          ScalarEvolution *SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
-          LoopInfo *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-          auto *DTWP = getAnalysisIfAvailable<DominatorTreeWrapperPass>();
-          DominatorTree *DT = DTWP ? &DTWP->getDomTree() : nullptr;
-          auto &TTIP = getAnalysis<TargetTransformInfoWrapperPass>();
-          TargetTransformInfo *TTI = &TTIP.getTTI(*L->getHeader()->getParent());
-          AssumptionCache *AC = &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(
-          *L->getHeader()->getParent());
-          */
-          Loop *InnerLoop = *L->begin();
-          errs() << "Loop flattening running on nested loop: " << L->getHeader()->getName() << "\n";
-          //
-          BranchInst *InnerBranch, *OuterBranch;
-          
-          PHINode *InnerInductionPHI, *OuterInductionPHI;
-          SmallPtrSet<PHINode *, 4> InnerPHIsToTransform;
-          Value *InnerBound, *OuterBound;
-          BinaryOperator *InnerIncrement, *OuterIncrement;
-          //-----------------------------------------------------------
-          // flatten the nested loop
-          //-----------------------------------------------------------
-          // Loop analysis
-          LoopAnalysis(L, OuterIncrement, OuterBound, OuterBranch);
-          LoopAnalysis(InnerLoop, InnerIncrement, InnerBound, InnerBranch);
-          // new loop bound
-          Value *NewBound = BinaryOperator::CreateMul(InnerBound, OuterBound, "NewBound", L->getLoopPreheader()->getTerminator());
-          // modify the trip cout of the outer loop
-          cast<User>(OuterBranch->getCondition())->setOperand(1, NewBound);
-        }
+      }
+      */
+      if (!InductionPHI) {
+        errs() << "Could not find induction PHI\n";
+      }
+    }
+
+    // PHInodeAnalysis
+    static void PHInodeAnalysis(Loop *L, Loop *InnerLoop,
+                      SmallPtrSetImpl<PHINode *> &InnerPHIsToTransform,
+                      PHINode *InnerInductionPHI, PHINode *OuterInductionPHI) {
+      
+    }
+
+    bool runOnLoop(Loop *L, LPPassManager &LPM) override {
+      errs() << "Default optimizations... \n";
+     
+      if  (L->getSubLoops().size() != 1) {
+        errs() << "Unnested loop, stop flattening it!";
+      }
+      else {
+        errs() << "Find nested loop...\n";
+        // Loop analysis pass
+        ScalarEvolution *SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+        errs() << "1...\n";
+        // Loop basic info
+        LoopInfo *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+        errs() << "2...\n";
+        // Donimatortree
+        auto *DTWP = getAnalysisIfAvailable<DominatorTreeWrapperPass>();
+        DominatorTree *DT = DTWP ? &DTWP->getDomTree() : nullptr;
+        errs() << "3...\n";
+        
+        Loop *InnerLoop = *L->begin();
+        errs() << "Loop flattening running on nested loop: " << L->getHeader()->getName() << "\n";
+        //
+        BranchInst *InnerBranch, *OuterBranch;
+        
+        PHINode *InnerInductionPHI, *OuterInductionPHI;
+        Value *InnerBound, *OuterBound;
+        BinaryOperator *InnerIncrement, *OuterIncrement;
+
+        //-----------------------------------------------------------
+        // flatten the nested loop
+        //-----------------------------------------------------------
+        // Loop analysis
+        LoopAnalysis(L, OuterIncrement, OuterBound, OuterBranch, OuterInductionPHI, SE);
+        LoopAnalysis(InnerLoop, InnerIncrement, InnerBound, InnerBranch, InnerInductionPHI, SE);
+
+        SmallPtrSet<PHINode *, 4> InnerPHIsToTransform;
+        // PHI node analysis
+        PHInodeAnalysis(L, InnerLoop, InnerPHIsToTransform, InnerInductionPHI, OuterInductionPHI);
+
+        // remove the PHI nodes related to innerloop backedge
+        //InnerInductionPHI->removeIncomingValue(InnerLoop->getLoopLatch());
+        //for (PHINode *PHI : InnerPHIsToTransform)
+         // PHI->removeIncomingValue(InnerLoop->getLoopLatch());
+
+        // new loop bound
+        Value *NewBound = BinaryOperator::CreateMul(InnerBound, OuterBound, "NewBound", L->getLoopPreheader()->getTerminator());
+        errs() << *NewBound <<"\n";
+        // modify the trip cout of the outer loop
+        cast<User>(OuterBranch->getCondition())->setOperand(1, NewBound);
+        // replace the inner loop backedge with unconditional exit
+        BasicBlock *InnerExitBlock = InnerLoop->getExitBlock();
+        BasicBlock *InnerExitingBlock = InnerLoop->getExitingBlock();
+        errs() << "==========================\n";
+        errs() << *InnerExitBlock << "\n";
+        errs() << "==========================\n";
+        errs() << *InnerExitingBlock << "\n";
+        InnerExitingBlock->getTerminator()->eraseFromParent();
+        BranchInst::Create(InnerExitBlock, InnerExitingBlock);
+        DT->deleteEdge(InnerExitingBlock, InnerLoop->getHeader());
+        errs() << "==========================\n";
+        errs() << *InnerExitBlock << "\n";
+        errs() << "==========================\n";
+        errs() << *InnerExitingBlock << "\n";
+
+        // mark the inner loop as a deleted one
+        LPM.markLoopAsDeleted(*InnerLoop);
+        SE->forgetLoop(L);
+        SE->forgetLoop(InnerLoop);
+        //LI->erase(InnerLoop);
+        errs() << *L << "\n";
       }
 
       // change the code if LICM optimization is performaned 
