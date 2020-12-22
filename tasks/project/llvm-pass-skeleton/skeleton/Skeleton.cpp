@@ -60,6 +60,57 @@ namespace {
       //errs() << "Loop increment: " << Increment << "\n";
     }
 
+    bool hasNoMemoryOps(BasicBlock *b)
+    {
+      for (BasicBlock::iterator I = b->begin(), E = b->end(); I != E; I++)
+      {
+        switch (I->getOpcode())
+        {
+        case Instruction::Store:
+        case Instruction::Invoke:
+        case Instruction::VAArg:
+        case Instruction::Call:
+        case Instruction::Load:
+          errs() << *I << "\n";
+          return false;
+        }
+      }
+      return true;
+    }
+
+    bool isPerfectNest(Loop *L, BasicBlock*& body, LoopInfo *LI)
+    {
+      //get induction variable
+      PHINode *ivar = L->getCanonicalInductionVariable();
+      if (!ivar)
+        return false;
+      if (L->getBlocks().size() == 1)
+      {
+        body = *L->block_begin();
+        return true;
+      }
+      else
+      {
+        //do we have a single subloop?
+        if (L->getSubLoops().size() != 1)
+          return false;
+        //make sure all our non-nested loop blocks are innocuous
+        for (Loop::block_iterator b = L->block_begin(), e = L->block_end(); b
+            != e; b++)
+        {
+          BasicBlock *block = *b;
+          if (LI->getLoopFor(block) == L)
+          {
+            if (!hasNoMemoryOps(block))
+              return false;				
+          }
+        }
+
+        //recursively check subloops
+        return isPerfectNest(*L->begin(), body, LI);
+      }
+    }
+
     bool runOnLoop(Loop *L, LPPassManager &LPM) override {
       errs() << "Default optimizations... \n";
      
@@ -77,13 +128,21 @@ namespace {
         DominatorTree *DT = DTWP ? &DTWP->getDomTree() : nullptr;
         
         Loop *InnerLoop = *L->begin();
-        errs() << "Loop flattening running on nested loop: " << L->getHeader()->getName() << "\n";
-       
+        //errs() << "Loop flattening running on nested loop: " << L->getHeader()->getName() << "\n";
+        //errs() << "Loop flattening running on nested loop: " << L->getName() << "\n";
+
+
         // local variables 
         BranchInst *InnerBranch, *OuterBranch;
         Value *InnerBound, *OuterBound;
         BinaryOperator *InnerIncrement, *OuterIncrement;
+        BasicBlock *body;
 
+        // check whether this loop is a perfect loop
+        if (!isPerfectNest(L, body, LI)) {
+          errs() << "Not a perfect loop, stop flattening. \n";
+          return false;
+        }
 
         //-----------------------------------------------------------
         // flatten the nested loop
